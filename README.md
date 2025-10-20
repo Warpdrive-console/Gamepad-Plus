@@ -5,7 +5,17 @@ Known Issues:
 - It doesn't like all Switch Pro Controllers
 
 # Docs
-Gamepad+ supports up to 16 gamepads at the same time! In order to tell which gamepad what to do, you use this block! It's a dropdown menu, but allows works with public and private variables.
-It tells the program which gamepad is required to run the code, usually numbered 1-16.
+**Focus Gamepad**
+
 <img width="491" height="96" alt="focus" src="https://github.com/user-attachments/assets/8155c540-8a0e-4771-8c22-fe4436d2aa71" />
 
+Gamepad+ can support up to 16 gamepads at once. To decrease bloat, we made the focus system. This block tells the program which gamepad should be listening for the instructions. 
+Focus Gamepad is a basic dropdown menu, but also accepts public *and* private variables as well.
+
+There's several ways to allow every gamepad to use the same input scrpit, but I suggest having a "Controls" Sprite create a clone for every connected gamepad, then assign it the matching ID.
+
+<img width="687" height="577" alt="gamead setupi" src="https://github.com/user-attachments/assets/d3526c72-e6db-4c40-98ae-2d7534473e7e" />
+
+From there, you can add controls as normal:
+
+<img width="1670" height="801" alt="movement code" src="https://github.com/user-attachments/assets/73c492d1-5fac-465e-9def-2f278a9e38e5" />
