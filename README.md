@@ -2,7 +2,8 @@
 Gamepad+ is an extension for Scratch mods that uses the Gamepad API to create a close to universal extension for most modern controllers, and input devices in the usecase of Warpdrive App Development.
 
 Known Issues:
-- It doesn't like all Switch Pro Controllers
+- Button Mapping may be inconsistent on 3rd party gamepads.
+- Analog Trigger support is hit or miss. Supported Analog Triggers includes Xbox 360, Dualshock 3+4, Dualsense, Most Xbox One gamepads, and Most 3rd Party Gamepads.
 
 # Docs
 # Focus Gamepad
