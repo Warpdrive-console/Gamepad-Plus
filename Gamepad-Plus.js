@@ -1,4 +1,5 @@
-// Gamepad+ Auto Mapping with Proper Triggers
+// Gamepad+ extension written by Warpdrive Team as a universal controller API for Warpdrive Consoles.
+// Gamepad+ 1.7
 (function(Scratch) {
     'use strict';
 
@@ -284,3 +285,4 @@
 
     Scratch.extensions.register(new GamepadExtension());
 })(Scratch);
+
