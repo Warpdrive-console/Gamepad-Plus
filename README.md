@@ -7,9 +7,12 @@ Known Issues:
 # Docs
 # Focus Gamepad
 
+The Focus Gamepad block is local *Per Sprite* and *Per Clone.* You must focus a gamepad(s) before calling any input code in every sprite you have input code in.
+
 <img width="491" height="96" alt="focus" src="https://github.com/user-attachments/assets/8155c540-8a0e-4771-8c22-fe4436d2aa71" />
 
-This block allows you to choose which connected gamepad listens for your input code. It also accepts both public *and* private variables as well. This allows for multiple gamepads to use the same input code.
+This block allows you to choose which connected gamepad listens for your input code. It also accepts both public *and* private variables in the input. This allows for multiple gamepads to use the same input code.
+
 There's several ways to allow multiple gamepads to use the same input code, but I suggest having a "Controls" Sprite create a clone for every connected gamepad, then assign each clone with a private variable matching a corresponding gamepad.
 
 <img width="687" height="577" alt="gamead setupi" src="https://github.com/user-attachments/assets/d3526c72-e6db-4c40-98ae-2d7534473e7e" />
