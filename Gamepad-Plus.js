@@ -1,5 +1,5 @@
 // Gamepad+ extension written by Warpdrive Team as a universal controller API for Warpdrive Consoles.
-// Gamepad+ 1.8
+// Gamepad+ 2.0
 (function(Scratch) {
     'use strict';
 
@@ -9,7 +9,10 @@
         deadzone: 0.1,
         controllerMapping: new Map(),
         buttonStates: new Map(),
-        autoMappings: new Map()
+        autoMappings: new Map(),
+        actions: new Map(),
+        actionStates: new Map(),
+        customActions: []
     };
 
     for (let i = 1; i <= MAX_CONTROLLERS; i++) {
@@ -36,8 +39,7 @@
     function getGamepad(util, virtualId) {
         const id = parseInt(virtualId) || getFocusedId(util);
         const physicalIndex = state.controllerMapping.get(id) ?? (id - 1);
-        const gamepads = navigator.getGamepads();
-        return gamepads[physicalIndex] || null;
+        return navigator.getGamepads()[physicalIndex] || null;
     }
 
     function getFocusedId(util) {
@@ -49,6 +51,12 @@
         return Math.round(val * 100) / 100;
     }
 
+    function applyDeadzone(value) {
+        const abs = Math.abs(value);
+        if (abs < state.deadzone) return 0;
+        return value / (1 - state.deadzone);
+    }
+
     function getLayout(pad) {
         if (!pad) return DEFAULT_MAPPING;
         if (state.autoMappings.has(pad.id)) return state.autoMappings.get(pad.id);
@@ -56,27 +64,33 @@
         const id = (pad.id || '').toLowerCase();
         let layout = { ...DEFAULT_MAPPING };
 
-        if (id.includes("switch") || id.includes("pro controller") || id.includes("Switch")) {
+        if (id.includes("switch") || id.includes("pro controller")) {
             layout.faceButtons = { A: 1, B: 0, X: 3, Y: 2 };
             layout.type = "switch";
         } else if (id.includes("dualshock") || id.includes("dualsense") || id.includes("wireless controller")) {
-            layout.leftTriggerButton = 6;
-            layout.rightTriggerButton = 7;
             layout.type = "playstation";
         } else if (id.includes("xbox")) {
             layout.type = "xbox";
-        }
-
-        if (pad.axes.length >= 6) {
-            layout.leftTriggerButton = pad.buttons[6] ? 6 : null;
-            layout.rightTriggerButton = pad.buttons[7] ? 7 : null;
         }
 
         state.autoMappings.set(pad.id, layout);
         return layout;
     }
 
+    function resolveButtonIndex(pad, buttonName) {
+        const layout = getLayout(pad);
+        return layout.faceButtons[buttonName] ?? BUTTON_MAP_BASE[buttonName];
+    }
+
     class GamepadExtension {
+        constructor() {
+            this.vm = null;
+        }
+
+        setRuntime(runtime) {
+            this.vm = runtime;
+        }
+
         getInfo() {
             return {
                 id: 'gamepadplus',
@@ -95,188 +109,166 @@
                     { opcode: 'buttonValue', blockType: Scratch.BlockType.REPORTER, text: 'pressure of button [BUTTON]', arguments: { BUTTON: { type: Scratch.ArgumentType.STRING, defaultValue: 'A', menu: 'buttons' } } },
                     { opcode: 'connected', blockType: Scratch.BlockType.BOOLEAN, text: 'focused pad is connected' },
                     { opcode: 'countConnected', blockType: Scratch.BlockType.REPORTER, text: 'number of connected pads' },
-                    { opcode: 'remapPad', blockType: Scratch.BlockType.COMMAND, text: 'swap gamepad slot [SLOT1] with [SLOT2]', arguments: { SLOT1: { type: Scratch.ArgumentType.STRING, defaultValue: '1', menu: 'idMenu' }, SLOT2: { type: Scratch.ArgumentType.STRING, defaultValue: '2', menu: 'idMenu' } } },
-                    { opcode: 'setFocusedGamepad', blockType: Scratch.BlockType.COMMAND, text: 'set this sprite’s focused gamepad to [ID]', arguments: { ID: { type: Scratch.ArgumentType.STRING, defaultValue: '1', menu: 'idMenu' } } },
                     { opcode: 'setDeadzone', blockType: Scratch.BlockType.COMMAND, text: 'set deadzone to [VALUE]', arguments: { VALUE: { type: Scratch.ArgumentType.NUMBER, defaultValue: 0.1 } } },
-                    { opcode: 'listGamepadsBySlot', blockType: Scratch.BlockType.REPORTER, text: 'list of gamepads by slot' },
-                    { opcode: 'listGamepadNames', blockType: Scratch.BlockType.REPORTER, text: 'gamepad names' },
-                    { opcode: 'getNameByIndex', blockType: Scratch.BlockType.REPORTER, text: 'name at index [INDEX]', arguments: { INDEX: { type: Scratch.ArgumentType.NUMBER, defaultValue: 1 } } },
-                    { opcode: 'rumble', blockType: Scratch.BlockType.COMMAND, text: 'rumble magnitude [STRENGTH] minimum [FLOOR] for [DURATION] seconds', arguments: { STRENGTH: { type: Scratch.ArgumentType.NUMBER, defaultValue: 1 }, FLOOR: { type: Scratch.ArgumentType.NUMBER, defaultValue: 0.2 }, DURATION: { type: Scratch.ArgumentType.NUMBER, defaultValue: 1 } } }
+                    { opcode: 'createAction', blockType: Scratch.BlockType.COMMAND, text: 'create action [ACTION]', arguments: { ACTION: { type: Scratch.ArgumentType.STRING, defaultValue: 'jump' } } },
+                    { opcode: 'bindAction', blockType: Scratch.BlockType.COMMAND, text: 'bind action [ACTION] to button [BUTTON]', arguments: { ACTION: { type: Scratch.ArgumentType.STRING, defaultValue: '', menu: 'actionMenu' }, BUTTON: { type: Scratch.ArgumentType.STRING, defaultValue: 'A', menu: 'buttons' } } },
+                    { opcode: 'actionDown', blockType: Scratch.BlockType.BOOLEAN, text: 'action [ACTION] is down', arguments: { ACTION: { type: Scratch.ArgumentType.STRING, defaultValue: '', menu: 'actionMenu' } } },
+                    { opcode: 'whenActionPressed', blockType: Scratch.BlockType.HAT, text: 'when action [ACTION] pressed', arguments: { ACTION: { type: Scratch.ArgumentType.STRING, defaultValue: '', menu: 'actionMenu' } } },
+                    { opcode: 'clearAction', blockType: Scratch.BlockType.COMMAND, text: 'clear action [ACTION]', arguments: { ACTION: { type: Scratch.ArgumentType.STRING, defaultValue: '', menu: 'actionMenu' } } },
+                    { opcode: 'getActionMap', blockType: Scratch.BlockType.REPORTER, text: 'action map as JSON', arguments: {} }
                 ],
                 menus: {
                     buttons: { acceptReporters: true, items: Object.keys(BUTTON_MAP_BASE) },
                     sticks: { acceptReporters: true, items: ['Left', 'Right'] },
                     axes: { acceptReporters: true, items: ['X', 'Y'] },
                     triggerMenu: { acceptReporters: true, items: ['left', 'right'] },
-                    idMenu: { acceptReporters: true, items: Array.from({ length: MAX_CONTROLLERS }, (_, i) => String(i + 1)) }
+                    actionMenu: { acceptReporters: false, items: 'allActions' }
                 }
             };
+        }
+
+        allActions() {
+            if (state.customActions.length === 0) return ["(no actions)"];
+            return state.customActions;
         }
 
         whenButtonPressed({ BUTTON }, util) {
             const pad = getGamepad(util);
             if (!pad) return false;
-            const layout = getLayout(pad);
-            const index = layout.faceButtons[BUTTON] ?? BUTTON_MAP_BASE[BUTTON];
-            if (index === undefined) return false;
-
-            const btn = pad.buttons[index];
-            const isPressed = btn?.pressed || false;
+            const index = resolveButtonIndex(pad, BUTTON);
+            const pressed = pad.buttons[index]?.pressed || false;
             const key = `${getFocusedId(util)}:${BUTTON}`;
-            const wasPressed = state.buttonStates.get(key) || false;
-            state.buttonStates.set(key, isPressed);
-            return isPressed && !wasPressed;
+            const last = state.buttonStates.get(key) || false;
+            state.buttonStates.set(key, pressed);
+            return pressed && !last;
         }
 
         buttonPressed({ BUTTON }, util) {
             const pad = getGamepad(util);
             if (!pad) return false;
-            const layout = getLayout(pad);
-            const index = layout.faceButtons[BUTTON] ?? BUTTON_MAP_BASE[BUTTON];
-            return pad.buttons[index]?.pressed || false;
+            return pad.buttons[resolveButtonIndex(pad, BUTTON)]?.pressed || false;
         }
 
         buttonValue({ BUTTON }, util) {
             const pad = getGamepad(util);
             if (!pad) return 0;
-            const layout = getLayout(pad);
-            const index = layout.faceButtons[BUTTON] ?? BUTTON_MAP_BASE[BUTTON];
-            const btn = pad.buttons[index];
-            return roundHundredths(btn?.value ?? (btn?.pressed ? 1 : 0));
+            const btn = pad.buttons[resolveButtonIndex(pad, BUTTON)];
+            return roundHundredths(btn?.value ?? 0);
         }
 
         getStick({ STICK, AXIS }, util) {
             const pad = getGamepad(util);
             if (!pad) return 0;
-            const layout = getLayout(pad);
-            const axes = STICK === 'Left' ? layout.leftStick : layout.rightStick;
+            const axes = getLayout(pad)[STICK === 'Left' ? 'leftStick' : 'rightStick'];
             return applyDeadzone(pad.axes[axes[AXIS]] || 0);
         }
 
         getStickDirection({ STICK }, util) {
             const pad = getGamepad(util);
             if (!pad) return 0;
-            const layout = getLayout(pad);
-            const axes = STICK === 'Left' ? layout.leftStick : layout.rightStick;
+            const axes = getLayout(pad)[STICK === 'Left' ? 'leftStick' : 'rightStick'];
             const x = applyDeadzone(pad.axes[axes.X] || 0);
             const y = applyDeadzone(pad.axes[axes.Y] || 0);
-            if (x === 0 && y === 0) return 0;
-            let angle = Math.atan2(x, -y) * (180 / Math.PI);
-            angle = ((angle + 180) % 360) - 180;
-            return Math.round(angle);
+            if (!x && !y) return 0;
+            return Math.round(Math.atan2(x, -y) * 180 / Math.PI);
         }
 
         getStickMagnitude({ STICK }, util) {
             const pad = getGamepad(util);
             if (!pad) return 0;
-            const layout = getLayout(pad);
-            const axes = STICK === 'Left' ? layout.leftStick : layout.rightStick;
+            const axes = getLayout(pad)[STICK === 'Left' ? 'leftStick' : 'rightStick'];
             const x = applyDeadzone(pad.axes[axes.X] || 0);
             const y = applyDeadzone(pad.axes[axes.Y] || 0);
-            return Math.min(1, Math.sqrt(x * x + y * y));
+            return Math.min(1, Math.sqrt(x*x + y*y));
         }
 
-        stickInUse({ STICK }, util) {
-            return this.getStickMagnitude({ STICK }, util) >= state.deadzone;
+        stickInUse(args, util) {
+            return this.getStickMagnitude(args, util) > 0;
         }
 
         getTrigger({ TRIGGER }, util) {
             const pad = getGamepad(util);
-            if (!pad || !pad.connected) return 0;
-            const layout = getLayout(pad);
-            const isLeft = TRIGGER === 'left';
-            let val = 0;
-
-            if (isLeft) {
-                if (layout.leftTriggerButton !== null) val = pad.buttons[layout.leftTriggerButton]?.value ?? 0;
-                else val = (pad.axes[2] ?? -1) / 2 + 0.5;
-            } else {
-                if (layout.rightTriggerButton !== null) val = pad.buttons[layout.rightTriggerButton]?.value ?? 0;
-                else val = (pad.axes[5] ?? -1) / 2 + 0.5;
-            }
-
-            return roundHundredths(val);
+            if (!pad) return 0;
+            return roundHundredths(pad.buttons[TRIGGER === 'left' ? 6 : 7]?.value || 0);
         }
 
         connected(_, util) {
-            const pad = getGamepad(util);
-            return pad !== null && pad.connected;
+            return !!getGamepad(util)?.connected;
         }
 
         countConnected() {
-            return Array.from(navigator.getGamepads()).filter(p => p && p.connected).length;
-        }
-
-        remapPad({ SLOT1, SLOT2 }) {
-            const s1 = parseInt(SLOT1), s2 = parseInt(SLOT2);
-            if (s1 < 1 || s1 > MAX_CONTROLLERS || s2 < 1 || s2 > MAX_CONTROLLERS || s1 === s2) return;
-
-            const p1 = state.controllerMapping.get(s1) ?? (s1 - 1);
-            const p2 = state.controllerMapping.get(s2) ?? (s2 - 1);
-            state.controllerMapping.set(s1, p2);
-            state.controllerMapping.set(s2, p1);
-
-            for (const key of state.buttonStates.keys()) {
-                const [slotId] = key.split(':');
-                if (parseInt(slotId) === s1 || parseInt(slotId) === s2) state.buttonStates.delete(key);
-            }
-
-            const pads = navigator.getGamepads();
-            if (pads[p1]) state.autoMappings.delete(pads[p1].id);
-            if (pads[p2]) state.autoMappings.delete(pads[p2].id);
-        }
-
-        setFocusedGamepad({ ID }, util) {
-            const id = parseInt(ID);
-            if (id < 1 || id > MAX_CONTROLLERS) return;
-            if (util && util.target) util.target.focusedGamepadId = id;
+            return navigator.getGamepads().filter(p => p?.connected).length;
         }
 
         setDeadzone({ VALUE }) {
-            const val = parseFloat(VALUE);
-            if (!isNaN(val)) state.deadzone = Math.max(0, Math.min(1, val));
+            state.deadzone = Math.max(0, Math.min(1, Number(VALUE)));
         }
 
-        listGamepadsBySlot() {
-            const pads = navigator.getGamepads();
-            return JSON.stringify(Array.from({ length: MAX_CONTROLLERS }, (_, i) => {
-                const pad = pads[state.controllerMapping.get(i + 1) ?? i];
-                return pad && pad.connected ? pad.id : '';
-            }));
+        createAction({ ACTION }) {
+            const actionName = String(ACTION).trim();
+            if (actionName && !state.customActions.includes(actionName)) {
+                state.customActions.push(actionName);
+                if (this.vm?.refreshExtensionBlocks) this.vm.refreshExtensionBlocks();
+            }
         }
 
-        listGamepadNames() {
-            const pads = navigator.getGamepads();
-            return JSON.stringify(Array.from({ length: MAX_CONTROLLERS }, (_, i) => {
-                const pad = pads[state.controllerMapping.get(i + 1) ?? i];
-                if (!pad || !pad.connected) return '';
-                return (pad.id || '').split(/[\(\-\[]/)[0].trim();
-            }));
+        bindAction({ ACTION, BUTTON }) {
+            const actionName = String(ACTION).trim();
+            if (actionName && !state.customActions.includes(actionName)) {
+                state.customActions.push(actionName);
+                if (this.vm?.refreshExtensionBlocks) this.vm.refreshExtensionBlocks();
+            }
+            if (actionName) {
+                state.actions.set(actionName, BUTTON);
+            }
         }
 
-        getNameByIndex({ INDEX }) {
-            const idx = Math.floor(INDEX) - 1;
-            if (idx < 0 || idx >= MAX_CONTROLLERS) return '';
-            try { return JSON.parse(this.listGamepadNames())[idx] || ''; } catch { return ''; }
+        clearAction({ ACTION }) {
+            const actionName = String(ACTION).trim();
+            state.actions.delete(actionName);
+            const idx = state.customActions.indexOf(actionName);
+            if (idx >= 0) state.customActions.splice(idx, 1);
+            if (this.vm?.refreshExtensionBlocks) this.vm.refreshExtensionBlocks();
         }
 
-        async rumble({ STRENGTH, DURATION, FLOOR }, util) {
+        actionDown({ ACTION }, util) {
+            const actionName = String(ACTION).trim();
+            const btn = state.actions.get(actionName);
+            if (!btn) return false;
+            return this.buttonPressed({ BUTTON: btn }, util);
+        }
+
+        whenActionPressed({ ACTION }, util) {
+            const actionName = String(ACTION).trim();
+            const btn = state.actions.get(actionName);
+            if (!btn) return false;
             const pad = getGamepad(util);
-            if (!pad || !pad.vibrationActuator || pad.vibrationActuator.type !== 'dual-rumble') return;
-            const s = Math.max(parseFloat(FLOOR) || 0, Math.min(parseFloat(STRENGTH) || 1, 1));
-            const d = Math.max(0, (parseFloat(DURATION) || 0) * 1000);
-            if (s === 0 || d === 0) return;
-            try {
-                await pad.vibrationActuator.playEffect('dual-rumble', { duration: d, strongMagnitude: s, weakMagnitude: s });
-            } catch (e) { console.warn('Rumble failed:', e); }
+            if (!pad) return false;
+            const index = resolveButtonIndex(pad, btn);
+            const pressed = pad.buttons[index]?.pressed || false;
+            const key = `${getFocusedId(util)}:${actionName}`;
+            const last = state.actionStates.get(key) || false;
+            state.actionStates.set(key, pressed);
+            return pressed && !last;
         }
-    }
 
-    function applyDeadzone(value) {
-        const abs = Math.abs(value);
-        if (abs < state.deadzone) return 0;
-        return value / (1 - state.deadzone);
+        getActionMap() {
+            const actionArray = [];
+            for (const action of state.customActions) {
+                const button = state.actions.get(action);
+                actionArray.push({
+                    action: action,
+                    button: button || null
+                });
+            }
+            return JSON.stringify(actionArray);
+        }
     }
 
     Scratch.extensions.register(new GamepadExtension());
+
+    if (Scratch.vm) {
+        const ext = new GamepadExtension();
+        ext.setRuntime(Scratch.vm);
+    }
 })(Scratch);
