@@ -1,5 +1,6 @@
 // Gamepad+ extension written by Warpdrive Team as a universal controller API for Warpdrive Consoles.
-// Gamepad+ 2.1
+// Gamepad+ 2.2
+
 (function(Scratch) {
   'use strict';
 
@@ -12,9 +13,9 @@
     autoMappings: new Map(),
     actions: new Map(),
     actionStates: new Map(),
-    customActions: [],
+    spriteActions: new Map(),
     focusedGamepadId: 1,
-    lastPressedButton: ''
+    lastPressedButton: new Map()
   };
 
   for (let i = 1; i <= MAX_CONTROLLERS; i++) {
@@ -47,6 +48,17 @@
     Guide: 16
   });
 
+  const COMBO_MAP = Object.freeze({
+    'BothBumpers':    ['L1', 'R1'],
+    'BothTriggers':   ['L2', 'R2'],
+    'BothSticks':     ['L3', 'R3'],
+    'L1+L2':          ['L1', 'L2'],
+    'R1+R2':          ['R1', 'R2'],
+    'Start+Select':   ['Start', 'Select'],
+    'L1+R2':          ['L1', 'R2'],
+    'R1+L2':          ['R1', 'L2']
+  });
+
   function getGamepad(virtualId, util) {
     const id = parseInt(virtualId) || getFocusedId(util);
     const physicalIndex = state.controllerMapping.get(id) ?? (id - 1);
@@ -66,6 +78,20 @@
     const key = getSpriteKey(util);
     if (!state.actions.has(key)) state.actions.set(key, new Map());
     return state.actions.get(key);
+  }
+
+  function getSpriteActionSet(util) {
+    const key = getSpriteKey(util);
+    if (!state.spriteActions.has(key)) state.spriteActions.set(key, new Set());
+    return state.spriteActions.get(key);
+  }
+  
+  function getAllKnownActions() {
+    const all = new Set();
+    for (const set of state.spriteActions.values()) {
+      for (const name of set) all.add(name);
+    }
+    return [...all];
   }
 
   function roundHundredths(val) {
@@ -95,7 +121,8 @@
       faceButtons: { A: 0, B: 1, X: 2, Y: 3 }
     };
 
-    if (state.autoMappings.has(pad.id)) return state.autoMappings.get(pad.id);
+    const cacheKey = `${pad.index}:${pad.id}`;
+    if (state.autoMappings.has(cacheKey)) return state.autoMappings.get(cacheKey);
 
     const id = (pad.id || '').toLowerCase();
     const layout = {
@@ -116,13 +143,21 @@
       layout.type = 'xbox';
     }
 
-    state.autoMappings.set(pad.id, layout);
+    state.autoMappings.set(cacheKey, layout);
     return layout;
   }
 
   function resolveButtonIndex(pad, buttonName) {
     const layout = getLayout(pad);
     return layout.faceButtons[buttonName] ?? BUTTON_MAP_BASE[buttonName];
+  }
+
+  function isBindingPressed(pad, binding) {
+    if (!pad) return false;
+    if (Array.isArray(binding)) {
+      return binding.every(btn => pad.buttons[resolveButtonIndex(pad, btn)]?.pressed || false);
+    }
+    return pad.buttons[resolveButtonIndex(pad, binding)]?.pressed || false;
   }
 
   function edgeDetect(map, key, pressed) {
@@ -148,6 +183,7 @@
         color2: '#2e4a39',
         color3: '#4c7d5c',
         blocks: [
+
           {
             opcode: 'whenButtonPressed',
             blockType: Scratch.BlockType.HAT,
@@ -181,6 +217,7 @@
             text: 'when gamepad disconnected',
             isEdgeActivated: false
           },
+
           {
             opcode: 'buttonPressed',
             blockType: Scratch.BlockType.BOOLEAN,
@@ -202,13 +239,14 @@
             blockType: Scratch.BlockType.BOOLEAN,
             text: 'any button is pressed'
           },
+
           {
             opcode: 'getStick',
             blockType: Scratch.BlockType.REPORTER,
             text: '[STICK] stick [AXIS] value',
             arguments: {
               STICK: { type: Scratch.ArgumentType.STRING, defaultValue: 'Left', menu: 'sticks' },
-              AXIS: { type: Scratch.ArgumentType.STRING, defaultValue: 'X', menu: 'axes' }
+              AXIS:  { type: Scratch.ArgumentType.STRING, defaultValue: 'X',    menu: 'axes'   }
             }
           },
           {
@@ -217,7 +255,7 @@
             text: '[STICK] stick [AXIS] raw value',
             arguments: {
               STICK: { type: Scratch.ArgumentType.STRING, defaultValue: 'Left', menu: 'sticks' },
-              AXIS: { type: Scratch.ArgumentType.STRING, defaultValue: 'X', menu: 'axes' }
+              AXIS:  { type: Scratch.ArgumentType.STRING, defaultValue: 'X',    menu: 'axes'   }
             }
           },
           {
@@ -249,10 +287,11 @@
             blockType: Scratch.BlockType.BOOLEAN,
             text: '[STICK] stick pointing [DIRECTION]',
             arguments: {
-              STICK: { type: Scratch.ArgumentType.STRING, defaultValue: 'Left', menu: 'sticks' },
-              DIRECTION: { type: Scratch.ArgumentType.STRING, defaultValue: 'up', menu: 'cardinalMenu' }
+              STICK:     { type: Scratch.ArgumentType.STRING, defaultValue: 'Left', menu: 'sticks'       },
+              DIRECTION: { type: Scratch.ArgumentType.STRING, defaultValue: 'up',   menu: 'cardinalMenu' }
             }
           },
+
           {
             opcode: 'getTrigger',
             blockType: Scratch.BlockType.REPORTER,
@@ -282,6 +321,7 @@
             blockType: Scratch.BlockType.REPORTER,
             text: 'last pressed button'
           },
+
           {
             opcode: 'connected',
             blockType: Scratch.BlockType.BOOLEAN,
@@ -315,6 +355,7 @@
             blockType: Scratch.BlockType.REPORTER,
             text: 'deadzone'
           },
+
           {
             opcode: 'remapPad',
             blockType: Scratch.BlockType.COMMAND,
@@ -345,6 +386,7 @@
               VALUE: { type: Scratch.ArgumentType.NUMBER, defaultValue: 0.1 }
             }
           },
+
           {
             opcode: 'listGamepadsBySlot',
             blockType: Scratch.BlockType.REPORTER,
@@ -363,16 +405,27 @@
               INDEX: { type: Scratch.ArgumentType.NUMBER, defaultValue: 1 }
             }
           },
+
           {
             opcode: 'rumble',
             blockType: Scratch.BlockType.COMMAND,
-            text: 'rumble magnitude [STRENGTH] minimum [FLOOR] for [DURATION] seconds',
+            text: 'rumble strong [STRONG] weak [WEAK] for [DURATION] s',
             arguments: {
-              STRENGTH: { type: Scratch.ArgumentType.NUMBER, defaultValue: 1 },
-              FLOOR: { type: Scratch.ArgumentType.NUMBER, defaultValue: 0.2 },
-              DURATION: { type: Scratch.ArgumentType.NUMBER, defaultValue: 1 }
+              STRONG:   { type: Scratch.ArgumentType.NUMBER, defaultValue: 1   },
+              WEAK:     { type: Scratch.ArgumentType.NUMBER, defaultValue: 0.5 },
+              DURATION: { type: Scratch.ArgumentType.NUMBER, defaultValue: 0.5 }
             }
           },
+          {
+            opcode: 'rumbleSimple',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'rumble [STRENGTH] for [DURATION] s',
+            arguments: {
+              STRENGTH: { type: Scratch.ArgumentType.NUMBER, defaultValue: 1   },
+              DURATION: { type: Scratch.ArgumentType.NUMBER, defaultValue: 0.5 }
+            }
+          },
+
           {
             opcode: 'createAction',
             blockType: Scratch.BlockType.COMMAND,
@@ -387,7 +440,16 @@
             text: 'bind action [ACTION] to button [BUTTON]',
             arguments: {
               ACTION: { type: Scratch.ArgumentType.STRING, defaultValue: '', menu: 'actionMenu' },
-              BUTTON: { type: Scratch.ArgumentType.STRING, defaultValue: 'A', menu: 'buttons' }
+              BUTTON: { type: Scratch.ArgumentType.STRING, defaultValue: 'A', menu: 'buttons'   }
+            }
+          },
+          {
+            opcode: 'bindActionCombo',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'bind action [ACTION] to combo [COMBO]',
+            arguments: {
+              ACTION: { type: Scratch.ArgumentType.STRING, defaultValue: '',            menu: 'actionMenu' },
+              COMBO:  { type: Scratch.ArgumentType.STRING, defaultValue: 'BothBumpers', menu: 'comboMenu'  }
             }
           },
           {
@@ -428,13 +490,15 @@
             text: 'action map as JSON'
           }
         ],
+
         menus: {
-          buttons: { acceptReporters: true, items: Object.keys(BUTTON_MAP_BASE) },
-          sticks: { acceptReporters: true, items: ['Left', 'Right'] },
-          axes: { acceptReporters: true, items: ['X', 'Y'] },
-          triggerMenu: { acceptReporters: true, items: ['left', 'right'] },
-          cardinalMenu: { acceptReporters: true, items: ['up', 'down', 'left', 'right'] },
-          actionMenu: { acceptReporters: false, items: 'allActions' },
+          buttons:      { acceptReporters: true,  items: Object.keys(BUTTON_MAP_BASE) },
+          sticks:       { acceptReporters: true,  items: ['Left', 'Right']            },
+          axes:         { acceptReporters: true,  items: ['X', 'Y']                   },
+          triggerMenu:  { acceptReporters: true,  items: ['left', 'right']            },
+          cardinalMenu: { acceptReporters: true,  items: ['up', 'down', 'left', 'right'] },
+          comboMenu:    { acceptReporters: true,  items: Object.keys(COMBO_MAP)       },
+          actionMenu:   { acceptReporters: false, items: 'allActions'                 },
           idMenu: {
             acceptReporters: true,
             items: Array.from({ length: MAX_CONTROLLERS }, (_, i) => String(i + 1))
@@ -444,8 +508,8 @@
     }
 
     allActions() {
-      if (state.customActions.length === 0) return ['(no actions)'];
-      return state.customActions;
+      const all = getAllKnownActions();
+      return all.length === 0 ? ['(no actions)'] : all;
     }
 
     whenButtonPressed({ BUTTON }, util) {
@@ -513,13 +577,7 @@
       if (!pad) return false;
       return pad.buttons.some(b => b?.pressed);
     }
-
-    buttonValue({ BUTTON }, util) {
-      const pad = getGamepad(getFocusedId(util), util);
-      if (!pad) return 0;
-      return roundHundredths(pad.buttons[resolveButtonIndex(pad, BUTTON)]?.value ?? 0);
-    }
-
+    
     getStick({ STICK, AXIS }, util) {
       const pad = getGamepad(getFocusedId(util), util);
       if (!pad) return 0;
@@ -564,8 +622,8 @@
       switch (DIRECTION) {
         case 'up':    return y < 0 && Math.abs(y) >= Math.abs(x);
         case 'down':  return y > 0 && Math.abs(y) >= Math.abs(x);
-        case 'left':  return x < 0 && Math.abs(x) > Math.abs(y);
-        case 'right': return x > 0 && Math.abs(x) > Math.abs(y);
+        case 'left':  return x < 0 && Math.abs(x) >  Math.abs(y);
+        case 'right': return x > 0 && Math.abs(x) >  Math.abs(y);
         default:      return false;
       }
     }
@@ -588,27 +646,32 @@
       return roundHundredths(Math.max(0, Math.min(1, val)));
     }
 
+    buttonValue({ BUTTON }, util) {
+      const pad = getGamepad(getFocusedId(util), util);
+      if (!pad) return 0;
+      return roundHundredths(pad.buttons[resolveButtonIndex(pad, BUTTON)]?.value ?? 0);
+    }
+
     getAxisRaw({ INDEX }, util) {
       const pad = getGamepad(getFocusedId(util), util);
       if (!pad) return 0;
       return roundHundredths(pad.axes[parseInt(INDEX)] ?? 0);
     }
-
     getLastPressedButton(_, util) {
       const pad = getGamepad(getFocusedId(util), util);
+      const spriteKey = getSpriteKey(util);
       if (pad) {
         for (const name of Object.keys(BUTTON_MAP_BASE)) {
           const index = resolveButtonIndex(pad, name);
           const pressed = pad.buttons[index]?.pressed || false;
-          const key = `lp:${getFocusedId(util)}:${name}`;
-          const last = state.buttonStates.get(key) ?? false;
-          state.buttonStates.set(key, pressed);
-          if (pressed && !last) state.lastPressedButton = name;
+          const edgeKey = `lp:${spriteKey}:${getFocusedId(util)}:${name}`;
+          const last = state.buttonStates.get(edgeKey) ?? false;
+          state.buttonStates.set(edgeKey, pressed);
+          if (pressed && !last) state.lastPressedButton.set(spriteKey, name);
         }
       }
-      return state.lastPressedButton;
+      return state.lastPressedButton.get(spriteKey) ?? '';
     }
-
     connected(_, util) {
       const pad = getGamepad(getFocusedId(util), util);
       return pad !== null && pad.connected;
@@ -649,8 +712,8 @@
       state.buttonStates.clear();
       state.actionStates.clear();
       const gamepads = navigator.getGamepads();
-      if (gamepads[phys1]) state.autoMappings.delete(gamepads[phys1].id);
-      if (gamepads[phys2]) state.autoMappings.delete(gamepads[phys2].id);
+      if (gamepads[phys1]) state.autoMappings.delete(`${phys1}:${gamepads[phys1].id}`);
+      if (gamepads[phys2]) state.autoMappings.delete(`${phys2}:${gamepads[phys2].id}`);
     }
 
     resetMapping() {
@@ -673,7 +736,6 @@
       const val = parseFloat(VALUE);
       if (!isNaN(val)) state.deadzone = Math.max(0, Math.min(1, val));
     }
-
     listGamepadsBySlot() {
       const gamepads = navigator.getGamepads();
       return JSON.stringify(
@@ -704,99 +766,106 @@
         return '';
       }
     }
-
-    async rumble({ STRENGTH, DURATION, FLOOR }, util) {
+    async rumble({ STRONG, WEAK, DURATION }, util) {
       const pad = getGamepad(getFocusedId(util), util);
       if (!pad?.vibrationActuator) return;
-      const strength = Math.max(parseFloat(FLOOR) || 0, Math.min(parseFloat(STRENGTH) || 1, 1));
+      const strong   = Math.max(0, Math.min(1, parseFloat(STRONG)   || 0));
+      const weak     = Math.max(0, Math.min(1, parseFloat(WEAK)     || 0));
       const duration = Math.max(0, (parseFloat(DURATION) || 0) * 1000);
-      if (strength === 0 || duration === 0) return;
+      if ((strong === 0 && weak === 0) || duration === 0) return;
       try {
         const actuator = pad.vibrationActuator;
         if (typeof actuator.playEffect === 'function') {
           await actuator.playEffect('dual-rumble', {
             duration,
-            strongMagnitude: strength,
-            weakMagnitude: strength
+            strongMagnitude: strong,
+            weakMagnitude:   weak
           });
         } else if (typeof actuator.pulse === 'function') {
-          await actuator.pulse(strength, duration);
+          await actuator.pulse(Math.max(strong, weak), duration);
         }
       } catch (e) {
         console.warn('Rumble failed:', e);
       }
     }
 
-    createAction({ ACTION }) {
-      const actionName = String(ACTION).trim();
-      if (actionName && !state.customActions.includes(actionName)) {
-        state.customActions.push(actionName);
-        if (this.vm?.refreshExtensionBlocks) this.vm.refreshExtensionBlocks();
-      }
+    async rumbleSimple({ STRENGTH, DURATION }, util) {
+      const s = Math.max(0, Math.min(1, parseFloat(STRENGTH) || 0));
+      return this.rumble({ STRONG: s, WEAK: s * 0.5, DURATION }, util);
+    }
+
+    _registerAction(actionName, util) {
+      if (!actionName) return;
+      getSpriteActionSet(util).add(actionName);
+      if (this.vm?.refreshExtensionBlocks) this.vm.refreshExtensionBlocks();
+    }
+
+    createAction({ ACTION }, util) {
+      this._registerAction(String(ACTION).trim(), util);
     }
 
     bindAction({ ACTION, BUTTON }, util) {
       const actionName = String(ACTION).trim();
       if (!actionName) return;
-      if (!state.customActions.includes(actionName)) {
-        state.customActions.push(actionName);
-        if (this.vm?.refreshExtensionBlocks) this.vm.refreshExtensionBlocks();
-      }
+      this._registerAction(actionName, util);
       getTargetActions(util).set(actionName, BUTTON);
     }
 
-    actionDown({ ACTION }, util) {
+    bindActionCombo({ ACTION, COMBO }, util) {
       const actionName = String(ACTION).trim();
-      const btn = getTargetActions(util).get(actionName);
-      if (!btn) return false;
-      return this.buttonPressed({ BUTTON: btn }, util);
+      if (!actionName) return;
+      const buttons = COMBO_MAP[COMBO];
+      if (!buttons) return;
+      this._registerAction(actionName, util);
+      getTargetActions(util).set(actionName, buttons);
+    }
+
+    actionDown({ ACTION }, util) {
+      const binding = getTargetActions(util).get(String(ACTION).trim());
+      if (!binding) return false;
+      return isBindingPressed(getGamepad(getFocusedId(util), util), binding);
     }
 
     whenActionPressed({ ACTION }, util) {
       const actionName = String(ACTION).trim();
-      const btn = getTargetActions(util).get(actionName);
-      if (!btn) return false;
+      const binding = getTargetActions(util).get(actionName);
+      if (!binding) return false;
       const pad = getGamepad(getFocusedId(util), util);
       if (!pad) return false;
       const { pressed, last } = edgeDetect(
         state.actionStates,
         `${getSpriteKey(util)}:${getFocusedId(util)}:ap:${actionName}`,
-        pad.buttons[resolveButtonIndex(pad, btn)]?.pressed || false
+        isBindingPressed(pad, binding)
       );
       return pressed && !last;
     }
 
     whenActionReleased({ ACTION }, util) {
       const actionName = String(ACTION).trim();
-      const btn = getTargetActions(util).get(actionName);
-      if (!btn) return false;
+      const binding = getTargetActions(util).get(actionName);
+      if (!binding) return false;
       const pad = getGamepad(getFocusedId(util), util);
       if (!pad) return false;
       const { pressed, last } = edgeDetect(
         state.actionStates,
         `${getSpriteKey(util)}:${getFocusedId(util)}:ar:${actionName}`,
-        pad.buttons[resolveButtonIndex(pad, btn)]?.pressed || false
+        isBindingPressed(pad, binding)
       );
       return !pressed && last;
     }
-
     clearAction({ ACTION }, util) {
       const actionName = String(ACTION).trim();
       getTargetActions(util).delete(actionName);
-      const anyHas = Array.from(state.actions.values()).some(m => m.has(actionName));
-      if (!anyHas) {
-        const idx = state.customActions.indexOf(actionName);
-        if (idx >= 0) state.customActions.splice(idx, 1);
-        if (this.vm?.refreshExtensionBlocks) this.vm.refreshExtensionBlocks();
-      }
+      getSpriteActionSet(util).delete(actionName);
+      if (this.vm?.refreshExtensionBlocks) this.vm.refreshExtensionBlocks();
     }
-
     getActionMap(_, util) {
-      const targetActions = getTargetActions(util);
+      const targetActions  = getTargetActions(util);
+      const spriteActionSet = getSpriteActionSet(util);
       return JSON.stringify(
-        state.customActions.map(action => ({
+        [...spriteActionSet].map(action => ({
           action,
-          button: targetActions.get(action) || null
+          binding: targetActions.get(action) || null
         }))
       );
     }
